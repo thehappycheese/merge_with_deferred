@@ -63,10 +63,10 @@ class AST:
         self.loc = AST_Slice_Maker(self)
     
     def __repr__(self):
-        return f"<AST {self.action}" + (
-            f" {self.children[0]}>"
+        return f"⟨AST {self.action}" + (
+            f" {self.children[0]}⟩"
             if len(self.children) == 1 and not isinstance(self.children[0], AST) 
-            else ">"
+            else "⟩"
         )
 
     def to_string(self, indent:str="", is_parents_last=False)->str:
@@ -78,7 +78,7 @@ class AST:
             modified_indent = indent
         
 
-        out = f"\n{modified_indent}[{self.action}]"
+        out = f"\n{modified_indent}⟨{self.action}⟩"
         if len(self.children)>0:
             *children_tail, children_head = self.children
             for islast, child in is_last(iter(self.children)):
@@ -89,6 +89,9 @@ class AST:
                 else:
                     out+=f'\n{indent+(" ┖╴" if islast else " ┠╴")}{child}'
         return out
+
+    def to_string_print(self):
+        print(self.to_string())
 
     @staticmethod
     def clone(myast:ASTChild) -> ASTChild:
@@ -162,6 +165,11 @@ class AST:
     
     def __invert__(self) -> AST:
         return AST("not", [self])
+    
+    def __bool__(self):
+        raise Exception(
+            "Cannot use `and`, `not` and `or` because `PEP 335 - Overloadable Boolean Operators` "
+            "was () rejected. Yay for python.")
     
     def sum(self) -> AST:
         return AST("sum",[self])

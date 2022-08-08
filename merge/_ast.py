@@ -38,7 +38,10 @@ Action = Literal[
     "slice",
     "declare",
     "refer",
-    "execute"
+    "execute",
+    "logical_and",
+    "logical_or",
+    "logical_not",
 ]
 ASTChild = Union["AST", float, int, bool, str]
 
@@ -168,8 +171,22 @@ class AST:
     
     def __bool__(self):
         raise Exception(
-            "Cannot use `and`, `not` and `or` because `PEP 335 - Overloadable Boolean Operators` "
-            "was () rejected. Yay for python.")
+            "Cannot use `and`, `not` and `or` because `PEP 335 - Overloadable Boolean Operators` was rejected.\n"
+            "Yay for python.\n"
+            "It was because the `and` and `or` operators have special short-circuit behavior;\n"
+            "the second operand of `or` will never be evaluated if the first operand evaluates to true.\n"
+            "This builtin behavior conflicts with our Abstract Syntax Tree building endeavour.\n"
+            "Please use `AST.logical_and(a,b)`, `AST.logical_or(a,b)` or `AST.logical_not(a)`.\n"
+            "Still, I think it was a bad decision."
+        )
+    
+    @staticmethod
+    def logical_and(left:ASTChild, right:ASTChild)->AST:
+        return AST("logical_and", [left, right])
+    
+    @staticmethod
+    def logical_or(left:ASTChild, right:ASTChild)->AST:
+        return AST("logical_or", [left, right])
     
     def sum(self) -> AST:
         return AST("sum",[self])
@@ -247,8 +264,7 @@ class AST:
             if myast.action == "filter":
                 series = walker(myast.children[0])
                 mask   = walker(myast.children[1])
-                print("series",series)
-                print("mask",  mask)
+                # todo: the checks below are not good
                 assert mask.dtype == bool, "Filter is not a boolean series"
                 assert (series.index == mask.index).all(), "Filter is not aligned to series"
                 return series.loc[mask]
@@ -302,6 +318,7 @@ class AST:
             
             if myast.action == "declare":
                 context[myast.children[0]] = walker(myast.children[1])
+                return None
             
             if myast.action == "refer":
                 return context[myast.children[0]]
@@ -329,7 +346,7 @@ class AST:
         return False
     
     @staticmethod          
-    def columns_required(myast) -> tuple[set[str], set[str]]:
+    def columns_required(myast:ASTChild) -> tuple[set[str], set[str]]:
         if not isinstance(myast, AST):
             return (set(), set())
         elif myast.action == "left_column":
@@ -354,6 +371,8 @@ class AST:
             else:                
                 if myast.action == "left_column" or myast.action == "right_column":
                     return myast.children[0]
+                elif len(myast.children) == 0:
+                    return f"{myast.action  }"
                 elif len(myast.children) == 1:
                     return f"{myast.action  }({walker(myast.children[0])})"
                 elif len(myast.children) == 2:
@@ -362,7 +381,12 @@ class AST:
                     else:
                         return f"{myast.action}({walker(myast.children[0])},{walker(myast.children[1])})"
                 else:
-                    raise Exception("Expected Unary or Binary operation when determining output column name")
+
+                    raise Exception(
+                        "Expected Unary or Binary operation when determining output column name."
+                        f"found an AST with {len(myast.children)=}:\n"
+                        + myast.to_string()
+                    )
         return walker(myast)
 
     @staticmethod
@@ -449,7 +473,8 @@ class AST:
 
         unique_subtrees = AST.unique_subtrees(myast)
         repeated_subtrees = [
-            (AST.follow_path(myast, item[0]), item) for item in unique_subtrees.values()
+            (AST.follow_path(myast, item[0]), item)
+            for item in unique_subtrees.values()
             if len(item)>1
         ]
 

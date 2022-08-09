@@ -469,7 +469,7 @@ class AST:
         if AST.compare_equal(left, right):
             return True
         elif isinstance(left, AST):
-            return all(AST.equal_or_contains(child, right) for child in left.children)
+            return any(AST.equal_or_contains(child, right) for child in left.children)
         else:
             return False
 
@@ -590,6 +590,7 @@ class AST:
                     _, declare_second, refer_second = declared[j]
                     
                     if AST.equal_or_contains(declare_first, refer_second):
+                        print("swap")
                         declared[i],declared[j] = declared[j],declared[i] 
                         swap_count += 1
                         start_again = True

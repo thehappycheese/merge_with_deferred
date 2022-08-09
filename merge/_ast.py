@@ -35,18 +35,22 @@ Action = Literal[
     "index_of_max",
     "at_index",
     "astype",
-    "slice",
+    "slice_integer",
+    "slice_label",
     "declare",
     "refer",
     "execute",
     "logical_and",
     "logical_or",
     "logical_not",
+    "isna",
+    "hstack",
+    "groupby"
+
 ]
-ASTChild = Union["AST", float, int, bool, str]
+ASTChild = Union["AST", float, int, bool, str, slice]
 
 Path_Value = tuple[list[int], ASTChild]
-
 
 
 class AST_Slice_Maker:
@@ -54,7 +58,15 @@ class AST_Slice_Maker:
     def __init__(self, host:AST) -> None:
         self.host = host
     def __getitem__(self, slicer:slice) -> AST:
-        return AST("slice",[self.host, slicer])
+        raise NotImplemented()
+
+class AST_Slice_Label_Maker(AST_Slice_Maker):
+    def __getitem__(self, slicer:slice) -> AST:
+        return AST("slice_label",[self.host, slicer])
+
+class AST_Slice_Integer_Maker(AST_Slice_Maker):
+    def __getitem__(self, slicer:slice) -> AST:
+        return AST("slice_integer",[self.host, slicer])
 
 class AST:
     action:Action
@@ -63,7 +75,8 @@ class AST:
     def __init__(self, action:Action, children:list[ASTChild]):
         self.action   = action
         self.children = children
-        self.loc = AST_Slice_Maker(self)
+        self.loc  = AST_Slice_Label_Maker  (self)
+        self.iloc = AST_Slice_Integer_Maker(self)
     
     def __repr__(self):
         return f"⟨AST {self.action}" + (
@@ -130,6 +143,12 @@ class AST:
     def length_of_right() -> AST:
         return AST("length_of_right", [])
 
+    def slice_label(self, slicer:ASTChild) -> AST:
+        return AST("slice_label", [self, slicer])
+    
+    def slice_integer(self, slicer:ASTChild) -> AST:
+        return AST("slice_integer", [self, slicer])
+
     def filter(self, other:AST) -> AST:
         return AST("filter", [self, other])
     
@@ -191,14 +210,24 @@ class AST:
     def sum(self) -> AST:
         return AST("sum",[self])
     
+    def isna(self) -> AST:
+        return AST("isna",[self])
+    
+    @staticmethod
+    def hstack(left:AST, right:AST) -> AST:
+        return AST("hstack",[left,right])
+    
     def index_of_max(self) -> AST:
         return AST("index_of_max",[self])
 
-    def at_index(self, idx:int) -> AST:
+    def at_index(self, idx:ASTChild) -> AST:
         return AST("at_index",[self, idx])
     
     def astype(self, typ:str) -> AST:
-        return AST("astype",[self, typ]) # can only be applied to grouped?
+        return AST("astype",[self, typ])
+    
+    def groupby(self, grouper:ASTChild) -> AST:
+        return AST("groupby",[self, grouper])
     
     @staticmethod
     def execute(statements:list[AST]) ->AST:
@@ -238,7 +267,6 @@ class AST:
             if not isinstance(myast, AST):
                 return myast
 
-            
             if myast.action == "left_column":
                 return left_columns[myast.children[0]]
 
@@ -259,69 +287,97 @@ class AST:
             
             if myast.action == "fraction_of_right":
                 return length_of_right / length_of_overlap
-            
+
+            # walk children in advance to help with future error checking            
+            walker_children = [walker(child) for child in myast.children]
 
             if myast.action == "filter":
-                series = walker(myast.children[0])
-                mask   = walker(myast.children[1])
+                series, mask = walker_children
                 # todo: the checks below are not good
-                assert mask.dtype == bool, "Filter is not a boolean series"
-                assert (series.index == mask.index).all(), "Filter is not aligned to series"
+                if not isinstance(series, (pd.Series, pd.DataFrame)):
+                    raise Exception(f"Unable to filter object {series} that is not a Series or DataFrame")
+                if not mask.dtype == bool:
+                    raise Exception(f"Filter mask is not a boolean series {mask}")
                 return series.loc[mask]
 
             if myast.action == "sum":
-                return walker(myast.children[0]).sum()
+                #if not isinstance(walker_children[0], (pd.Series, pd.DataFrame, pd.Gro)):
+                #    raise Exception(f"Unable to sum object {walker_children[0]} which is not Series or DataFrame")
+                return walker_children[0].sum()
 
             if myast.action == "+":
-                return walker(myast.children[0]) + walker(myast.children[1])
+                return walker_children[0] + walker_children[1]
             
             if myast.action == "-":
-                return walker(myast.children[0]) - walker(myast.children[1])
+                return walker_children[0] - walker_children[1]
 
             if myast.action == "*":
-                return walker(myast.children[0]) * walker(myast.children[1])
+                return walker_children[0] * walker_children[1]
             
             if myast.action == "/":
-                return walker(myast.children[0]) / walker(myast.children[1])
+                return walker_children[0] / walker_children[1]
             
             if myast.action == ">":
-                return walker(myast.children[0]) > walker(myast.children[1])
+                return walker_children[0] > walker_children[1]
             
             if myast.action == "<":
-                return walker(myast.children[0]) < walker(myast.children[1])
+                return walker_children[0] < walker_children[1]
 
             if myast.action == "neg":
-                return -walker(myast.children[0])
+                return -walker_children[0]
             
             if myast.action == "and":
-                return walker(myast.children[0]) & walker(myast.children[1])
+                return walker_children[0] & walker_children[1]
             
             if myast.action == "or":
-                return walker(myast.children[0]) | walker(myast.children[1])
+                return walker_children[0] | walker_children[1]
 
             if myast.action == "not":
-                return ~walker(myast.children[0])
+                return ~walker_children[0]
             
             if myast.action == "astype":
-                return walker(myast.children[0]).astype(walker(myast.children[1]))
+                return walker_children[0].astype(walker_children[1])
             
             if myast.action == "index_of_max":
-                ser = walker(myast.children[0])
-                return ser.index[ser.argmax()]
+                series = walker_children[0]
+                if not isinstance(series, pd.Series):
+                    raise Exception(f"unable to find index of maximum for object that is not Series {series}")
+                if series.empty:
+                    return pd.NA
+                return series.idxmax()
             
-            if myast.action == "slice":
-                ser = walker(myast.children[0])
-                return ser.loc[myast.children[1]]
+            if myast.action == "isna":
+                return walker_children[0].isna()
+            
+            if myast.action == "slice_label":
+                ser = walker_children[0]
+                return ser.loc[walker_children[1]]
+            
+            if myast.action == "slice_index":
+                ser = walker_children[0]
+                return ser.iloc[walker_children[1]]
 
             if myast.action == "at_index":
-                return walker(myast.children[0]).loc[walker(myast.children[1])]
+                try:
+                    return walker_children[0].loc[walker_children[1]]
+                except KeyError:
+                    return pd.NA
+            
+            if myast.action == "hstack":
+                return pd.concat([walker(each_ast) for each_ast in myast.children], axis="columns")
+
+            if myast.action == "groupby":
+                return walker_children[0].groupby(walker_children[1])
+            
+            if myast.action == "alias":
+                return walker_children[0]
             
             if myast.action == "declare":
-                context[myast.children[0]] = walker(myast.children[1])
+                context[walker_children[0]] = walker_children[1]
                 return None
             
             if myast.action == "refer":
-                return context[myast.children[0]]
+                return context[walker_children[0]]
 
             if myast.action == "execute":
                 *preliminary, last = myast.children
@@ -390,24 +446,15 @@ class AST:
         return walker(myast)
 
     @staticmethod
-    def follow_path(ast:ASTChild, path:list[int]):
-        if not isinstance(ast, AST) and len(path)>0:
-            raise Exception()
-        result = ast
-        for item in path:
-            result = result.children[item]
-        return result
-
-    @staticmethod
-    def output_column_name2(myast:ASTChild):
-        result = ""
+    def output_column_name_simple(myast:ASTChild):
         def walker(myast:ASTChild, accumulator:list[str]) -> list[str]:
-            nonlocal result
             if not isinstance(myast, AST):
                 return accumulator
             else:                
                 if myast.action == "left_column" or myast.action == "right_column":
                     return [*accumulator, myast.children[0]]
+                elif len(myast.children) == 0:
+                    return [*accumulator, myast.action]
                 elif myast.action == "alias":
                     return [*accumulator, myast.children[1]]
                 elif myast.action == "filter":
@@ -415,8 +462,29 @@ class AST:
                 else:
                     return [*accumulator, *itertools.chain(*[walker(item, []) for item in myast.children])]
 
-        return walker(myast,[])[-1]
+        return walker(myast,[])[0]
     
+    @staticmethod
+    def equal_or_contains(left:ASTChild, right:ASTChild) -> bool:
+        if AST.compare_equal(left, right):
+            return True
+        elif isinstance(left, AST):
+            return all(AST.equal_or_contains(child, right) for child in left.children)
+        else:
+            return False
+
+    @staticmethod
+    def follow_path(ast:ASTChild, path:list[int]):
+        if not isinstance(ast, AST) and len(path)>0:
+            raise Exception()
+        result:ASTChild = ast
+        for item in path:
+            if isinstance(result, AST):
+                result = result.children[item]
+            else:
+                raise Exception("Could not follow_path; tried to get child {item} of {result}")
+        return result
+
     @staticmethod
     def as_tuple(myast:ASTChild) -> Union[tuple, ASTChild]:
         # TODO: ensure result is hashable and serializable or there will be consequences
@@ -426,7 +494,7 @@ class AST:
             return (myast.action, *map(AST.as_tuple, myast.children))
 
     @staticmethod
-    def unique_subtrees(myast:ASTChild):
+    def unique_subtrees(myast:ASTChild) -> dict[Union[tuple, ASTChild], list[list[int]]]:
         
         nodes_to_visit:deque[Path_Value] = (
             deque() 
@@ -467,49 +535,69 @@ class AST:
         
 
     @staticmethod
-    def execution_plan(myast:ASTChild):
+    def optimize(myast:ASTChild):
         
         myast = AST.clone(myast)
 
+        # obtain a list of repeated subtrees
         unique_subtrees = AST.unique_subtrees(myast)
-        repeated_subtrees = [
-            (AST.follow_path(myast, item[0]), item)
-            for item in unique_subtrees.values()
-            if len(item)>1
+        repeated_subtrees:list[tuple[ASTChild, list[list[int]]]] = [
+            (AST.follow_path(myast, paths[0]), paths)
+            for paths in unique_subtrees.values()
+            if len(paths)>1
         ]
-
-        # replace all like subtrees with a reference to the same instance
-        # for _, path, subtree in sorted((-len(path), path, tree) for tree, paths in repeated_subtrees for path in paths):
-        #     *path_tail, path_head = path
-        #     print("======\n\n")
-        #     print(f"will replace child {path_head} at {path_tail} with \n{subtree.to_string()}")
-        #     AST.follow_path(myast, path_tail).children[path_head] = subtree
         
         # get a list of declare and refer objects
         declared = [
             (
+                paths,
                 AST.declare(f"subtree_{name}", tree),
                 AST.refer(f"subtree_{name}"),
-                path
             )
-            for name, (tree, path) 
+            for name, (tree, paths) 
             in enumerate(repeated_subtrees)
         ]
 
+        # explode entries by `paths` such that there is one entry per path
+        declared_exploded = [
+            (path, declare, refer)
+            for paths, declare, refer in declared 
+            for path in paths
+        ]
+        
+        # sort (inplace) declared_exploded by length of path
+        declared_exploded.sort(
+            key=lambda item:len(item[0]),
+            reverse=True
+        )
+
         # replace tree parts with refers
-        for _, path, reference in  sorted((-len(path), path, refer) for declare, refer, paths in declared for path in paths):
+        for path, _declare, refer in  declared_exploded:
             *path_tail, path_head = path
-            AST.follow_path(myast, path_tail).children[path_head] = reference
+            subtree_parent_ast = AST.follow_path(myast, path_tail)
+            if not isinstance(subtree_parent_ast, AST):
+                raise Exception("Tried to replace subtree with reference during optimization but failed because the subtree parent did not have children.")
+            subtree_parent_ast.children[path_head] = refer
         
-        return AST.execute([declare for declare,_,_ in reversed(declared)]+[myast])
+        # confirm dependency order by swapping declarations that depend on each other
+        swap_count = 0
+        start_again = True
+        while start_again and swap_count<50:
+            start_again = False
+            for i in range(len(declared)):
+                for j in range(i+1, len(declared)):
+                    _, declare_first,  refer_first  = declared[i]
+                    _, declare_second, refer_second = declared[j]
+                    
+                    if AST.equal_or_contains(declare_first, refer_second):
+                        declared[i],declared[j] = declared[j],declared[i] 
+                        swap_count += 1
+                        start_again = True
+                        break
+                if start_again:
+                    break
 
+        if start_again and swap_count==50:
+            raise Exception("Compilation failed... probably caused by a circular reference. I thought it wasn't possible, but you did it!")
         
-
-# {
-#     ('-',  ('+',   ('*', ('+', ('left_column', 'A'), 5), 2),   ('*', ('*', ('+', ('left_column', 'A'), 5), 2), 3)),  ('*', ('+', ('left_column', 'A'), 5), 2)): [],
-#     ('+',  ('*', ('+', ('left_column', 'A'), 5), 2),  ('*', ('*', ('+', ('left_column', 'A'), 5), 2), 3)): [[0]],
-#     ('*', ('+', ('left_column', 'A'), 5), 2):              [[1], [0, 0], [0, 1, 0]],
-#     ('*', ('*', ('+', ('left_column', 'A'), 5), 2), 3):    [[0, 1]],
-#     ('+', ('left_column', 'A'), 5):                        [[1, 0], [0, 0, 0], [0, 1, 0, 0]],
-#     ('left_column', 'A'):                                  [[1, 0, 0], [0, 0, 0, 0], [0, 1, 0, 0, 0]]
-# }
+        return AST.execute([declare for _path, declare, _refer in declared]+[myast])

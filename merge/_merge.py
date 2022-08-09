@@ -18,7 +18,7 @@ def merge_on_intervals(
     from_column, to_column = from_to
 
     # plan executions
-    add_columns_planned = [AST.execution_plan(myast) for myast in add_columns]
+    add_columns_planned = [AST.optimize(myast) for myast in add_columns]
     
     # determine the columns needed for the body of the algorithm
     left_columns_needed, right_columns_needed = reduce(
@@ -28,7 +28,7 @@ def merge_on_intervals(
 
     # determine the resulting column names
 
-    result_column_names = [AST.output_column_name(myast) for myast in add_columns]
+    result_column_names = [AST.output_column_name_simple(myast) for myast in add_columns]
 
     # keep the original left data, but with the index reset
     left_data_original = left_data.reset_index(drop=True)

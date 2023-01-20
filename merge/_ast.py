@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from re import S
 from typing import Any, Iterator, Literal, TypeVar, Union, Generator
 import itertools
@@ -62,21 +63,20 @@ class AST_Slice_Maker:
 
 class AST_Slice_Label_Maker(AST_Slice_Maker):
     def __getitem__(self, slicer:slice) -> AST:
-        return AST("slice_label",[self.host, slicer])
+        return AST("slice_label", (self.host, slicer))
 
 class AST_Slice_Integer_Maker(AST_Slice_Maker):
     def __getitem__(self, slicer:slice) -> AST:
-        return AST("slice_integer",[self.host, slicer])
+        return AST("slice_integer", (self.host, slicer))
 
+@dataclass(frozen=True)
 class AST:
     action:Action
-    children:list[ASTChild]
+    children:tuple[ASTChild, ...]
     
-    def __init__(self, action:Action, children:list[ASTChild]):
-        self.action   = action
-        self.children = children
-        self.loc  = AST_Slice_Label_Maker  (self)
-        self.iloc = AST_Slice_Integer_Maker(self)
+    # def __post_init__(self):
+    #     self.loc  = AST_Slice_Label_Maker  (self)
+    #     self.iloc = AST_Slice_Integer_Maker(self)
     
     def __repr__(self):
         return f"⟨AST {self.action}" + (
@@ -113,80 +113,80 @@ class AST:
     def clone(myast:ASTChild) -> ASTChild:
         if not isinstance(myast, AST):
             return myast
-        return AST(myast.action, [*map(AST.clone, myast.children)])
+        return AST(myast.action, tuple(map(AST.clone, myast.children)))
 
     @staticmethod
     def left_column(name:str) -> AST:
-        return AST("left_column", [name])
+        return AST("left_column", (name,))
     
     @staticmethod
     def right_column(name:str) -> AST:
-        return AST("right_column", [name])
+        return AST("right_column", (name,))
     
     @staticmethod
     def length_of_overlap() -> AST:
-        return AST("length_of_overlap", [])
+        return AST("length_of_overlap", tuple())
     
     @staticmethod
     def fraction_of_right() -> AST:
-        return AST("fraction_of_right", [])
+        return AST("fraction_of_right", tuple())
 
     @staticmethod
     def fraction_of_left() -> AST:
-        return AST("fraction_of_left", [])
+        return AST("fraction_of_left", tuple())
     
     @staticmethod
     def length_of_left() -> AST:
-        return AST("length_of_left", [])
+        return AST("length_of_left", tuple())
     
     @staticmethod
     def length_of_right() -> AST:
-        return AST("length_of_right", [])
+        return AST("length_of_right", tuple())
 
     def slice_label(self, slicer:ASTChild) -> AST:
-        return AST("slice_label", [self, slicer])
+        return AST("slice_label", (self, slicer))
     
     def slice_integer(self, slicer:ASTChild) -> AST:
-        return AST("slice_integer", [self, slicer])
+        return AST("slice_integer", (self, slicer))
 
     def filter(self, other:AST) -> AST:
-        return AST("filter", [self, other])
+        return AST("filter", (self, other))
     
     def alias(self, other:str) -> AST:
-        return AST("alias", [self, other])
+        return AST("alias", (self, other))
 
     def group_and_aggregate(self, other:AST) -> AST:
-        return AST("group_and_aggregate", [self, other])
+        return AST("group_and_aggregate", (self, other))
 
     def __add__(self, other:ASTChild) -> AST:
-        return AST("+",[self, other])
+        return AST("+",(self, other))
     
     def __sub__(self, other:ASTChild) -> AST:
-        return AST("-",[self, other])
+        return AST("-",(self, other))
     
     def __mul__(self, other:ASTChild) -> AST:
-        return AST("*",[self, other])
+        return AST("*",(self, other))
 
     def __truediv__(self, other:ASTChild) -> AST:
-        return AST("/",[self, other])
+        return AST("/",(self, other))
 
     def __gt__(self, other:ASTChild) -> AST:
-        return AST(">",[self, other])
+        return AST(">",(self, other))
 
     def __lt__(self, other:ASTChild) -> AST:
-        return AST("<",[self, other])
+        return AST("<",(self, other))
     
     def __eq__(self, other:ASTChild) -> AST:
-        return AST("==",[self, other])
+        return AST("==",(self, other))
     
     def __and__(self, other:ASTChild) -> AST:
-        return AST("and", [self, other])
+        return AST("and", (self, other))
     
     def __or__(self, other:ASTChild) -> AST:
-        return AST("or", [self, other])
+        return AST("or", (self, other))
     
     def __invert__(self) -> AST:
-        return AST("not", [self])
+        return AST("not", (self,))
     
     def __bool__(self):
         raise Exception(
@@ -201,45 +201,45 @@ class AST:
     
     @staticmethod
     def logical_and(left:ASTChild, right:ASTChild)->AST:
-        return AST("logical_and", [left, right])
+        return AST("logical_and", (left, right))
     
     @staticmethod
     def logical_or(left:ASTChild, right:ASTChild)->AST:
-        return AST("logical_or", [left, right])
+        return AST("logical_or", (left, right))
     
     def sum(self) -> AST:
-        return AST("sum",[self])
+        return AST("sum",(self,))
     
     def isna(self) -> AST:
-        return AST("isna",[self])
+        return AST("isna",(self,))
     
     @staticmethod
     def hstack(left:AST, right:AST) -> AST:
-        return AST("hstack",[left,right])
+        return AST("hstack",(left, right))
     
     def index_of_max(self) -> AST:
-        return AST("index_of_max",[self])
+        return AST("index_of_max", (self, ))
 
     def at_index(self, idx:ASTChild) -> AST:
-        return AST("at_index",[self, idx])
+        return AST("at_index",(self, idx))
     
     def astype(self, typ:str) -> AST:
-        return AST("astype",[self, typ])
+        return AST("astype",(self, typ))
     
     def groupby(self, grouper:ASTChild) -> AST:
-        return AST("groupby",[self, grouper])
+        return AST("groupby",(self, grouper))
     
     @staticmethod
-    def execute(statements:list[AST]) ->AST:
+    def execute(statements:tuple[AST,...]) ->AST:
         return AST("execute", statements)
 
     @staticmethod
     def declare(name:str, value:ASTChild) -> AST:
-        return AST("declare", [name, value])
+        return AST("declare", (name, value))
 
     @staticmethod
     def refer(name:str) -> AST:
-        return AST("refer", [name])
+        return AST("refer", (name,))
 
     @staticmethod
     def evaluate(
@@ -288,7 +288,7 @@ class AST:
             if myast.action == "fraction_of_right":
                 return length_of_right / length_of_overlap
 
-            # walk children in advance to help with future error checking            
+            # walk children in advance to help with future error checking
             walker_children = [walker(child) for child in myast.children]
 
             if myast.action == "filter":
@@ -529,9 +529,11 @@ class AST:
         return subtrees_seen
     
     @staticmethod
-    def max_depth(myast:ASTChild):
-        if not isinstance(myast, AST):
-            return 0
+    def max_depth(some_ast:ASTChild) -> int:
+        if not isinstance(some_ast, AST):
+            return 1
+        else:
+            return 1 + max(AST.max_depth(child) for child in some_ast.children)
         
 
     @staticmethod
@@ -577,7 +579,13 @@ class AST:
             subtree_parent_ast = AST.follow_path(myast, path_tail)
             if not isinstance(subtree_parent_ast, AST):
                 raise Exception("Tried to replace subtree with reference during optimization but failed because the subtree parent did not have children.")
-            subtree_parent_ast.children[path_head] = refer
+            # we cannot assign to indexed tuple, so we make a copy
+            replacement_children = list(subtree_parent_ast.children)
+            replacement_children[path_head] = refer
+            # we cannot assign to children because we froze the class
+            # there is no option to override the runtime error :/
+            # perhaps converting to tuple was a bad idea :/
+            subtree_parent_ast.children = tuple(replacement_children)
         
         # confirm dependency order by swapping declarations that depend on each other
         swap_count = 0
@@ -597,8 +605,7 @@ class AST:
                         break
                 if start_again:
                     break
-
         if start_again and swap_count==50:
             raise Exception("Compilation failed... probably caused by a circular reference. I thought it wasn't possible, but you did it!")
         
-        return AST.execute([declare for _path, declare, _refer in declared]+[myast])
+        return AST.execute(tuple(declare for _path, declare, _refer in declared)+(myast,))
